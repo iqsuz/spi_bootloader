@@ -12,7 +12,7 @@
 
 .global main
 
-.equ hfuse, 0x0100
+;.equ hfuse, 0x0100
 
 .equ bootsz0_bit_no, 1
 .equ bootsz1_bit_no, 2
@@ -27,11 +27,17 @@
 .set ss_line, 2
 
 .set handshake_pin, 7
+.set handshake_port, PORTD
 
 
 .equ desired_boot_size, bootsz_2048w
 
 .section .data
+	page_inf:
+		.word 1
+
+	hfuse:
+		.byte 1
 
 .section .text
 	main:
@@ -56,6 +62,12 @@
 
 		call init_spi
 		call init_handshake
+
+		call ss_low
+
+		ldi r16, 0x27
+		call set_page
+
 
 		;Erase the page of 0x00
 		ldi ZL, 0x00
@@ -82,9 +94,6 @@
 		ldi ZH, 0x00
 		call write_page
 
-		nop
-		nop
-		nop
 
 
 	wait_for_spm:
@@ -151,10 +160,11 @@
 		pop r16
 		ret
 
-	;This subroutine initializes SPI module along with related pins.
-	;MOSI --> PB3, SCK --> PB5, SS --> PB2
-	;Master, MSB, FCLK/2
+
 	init_spi:
+		;This subroutine initializes SPI module along with related pins.
+		;MOSI --> PB3, SCK --> PB5, SS --> PB2
+		;Master, MSB, FCLK/2
 		push r16
 
 		;This code block init the MOSI and SCK as output.
@@ -170,10 +180,10 @@
 		pop r16
 		ret
 	
-	;This subroutine initializes handshake pin as an input pin.
-	;For more information please refer to Handshake protocol presentaion file.
-	;Handshake Pin -- > Port D7 
 	init_handshake:
+		;This subroutine initializes handshake pin as an input pin.
+		;For more information please refer to Handshake protocol presentaion file.
+		;Handshake Pin -- > Port D7 
 		push r18
 
 		ldi r18, (1 << handshake_pin)
@@ -181,7 +191,46 @@
 
 		pop r18
 		ret
+	
+	ss_low:
+		;Set SS Pin low.
+		cbi _SFR_IO_ADDR(handshake_port), handshake_pin
+		ret
+
+	ss_high:
+		;Set SS Pin high.
+		sbi _SFR_IO_ADDR(handshake_port), handshake_pin
+		ret
+
+	set_page:
+		push r17
+		push r20
+		push r21
+
+		ldi r20, 0x00
+		ldi r21, 0x06
+		
+		ldi r17, 0x00
+		
+		rjmp .L1
+
+	.L2:
+		lsl r16
+		rol r17
+		inc r20
+
+	.L1:
+		cp r20, r21
+		brlo .L2
+
+		sts page_inf, r16
+		sts page_inf+1, r17
+
+		pop r21
+		pop r20
+		pop r17
+		ret
+
 
 	not_desired_bootsize:
-		nop
 		nop
