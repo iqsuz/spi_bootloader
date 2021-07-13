@@ -41,58 +41,76 @@
 
 .section .text
 	main:
-		;Reading FUSE_HIGH
-		;Set Z = 0x0003,
-		;Set BLBSET and SELFPRGEN in SMPCSR
-		;Read Z register within 3 cycles with LPM. So disable interrupts first.
-		cli	;Disable interrupts
-		ldi r30, 0x03	;Set Z = 0x0003
-		ldi r31, 0x00
-		ldi r16, (1<<BLBSET) | (1<<SELFPRGEN)	;Set BLBSET = 1, SELFPRGEN = 1
-		out _SFR_IO_ADDR(SPMCSR), r16	;Write BLBSET and SELFPRGEN to SPMCSR
-		lpm r17, Z
-		;sei	;Enable interrupts
+					/*;Reading FUSE_HIGH
+					;Set Z = 0x0003,
+					;Set BLBSET and SELFPRGEN in SMPCSR
+					;Read Z register within 3 cycles with LPM. So disable interrupts first.
+					cli	;Disable interrupts
+					ldi r30, 0x03	;Set Z = 0x0003
+					ldi r31, 0x00
+					ldi r16, (1<<BLBSET) | (1<<SELFPRGEN)	;Set BLBSET = 1, SELFPRGEN = 1
+					out _SFR_IO_ADDR(SPMCSR), r16	;Write BLBSET and SELFPRGEN to SPMCSR
+					lpm r17, Z
+					;sei	;Enable interrupts
 
-		sts hfuse, r17	;Store FUSE_HIGH in SRAM
+					sts hfuse, r17	;Store FUSE_HIGH in SRAM
 		
-		;Is bootsize large enough?
-		andi r17, bootsz_filter
-		cpi r17, desired_boot_size
-		;brne not_desired_bootsize	;Branch if it is not large enough.
+					;Is bootsize large enough?
+					andi r17, bootsz_filter
+					cpi r17, desired_boot_size
+					;brne not_desired_bootsize	;Branch if it is not large enough.*/
 
 		call init_spi
 		call init_handshake
 
-		call ss_low
-
 		ldi r16, 0x27
 		call set_page
 
+		ldi r16, 0x3B
+		call set_word
 
-		;Erase the page of 0x00
-		ldi ZL, 0x00
-		ldi ZH, 0x00
+		lds ZL, page_inf
+		lds ZH, page_inf+1
 		call erase_page
-	
-		call wait_for_spm	;Wait SPM command to be executed.
 
-		;Load buffer with data
-		ldi ZL, 0x00
-		ldi ZH, 0x00
+		call wait_for_spm
+
 		ldi r18, 0x0C
 		ldi r19, 0x94
 		call load_page_buffer
 
-		
-		/*Clear the RWWSB bit
-		ldi r16, 0x01
-		out _SFR_IO_ADDR(SPMCSR), r16
-		spm*/
-
-		;Write page
-		ldi ZL, 0x00
-		ldi ZH, 0x00
 		call write_page
+		call wait_for_spm
+
+
+					/*;Erase the page of 0x00
+					ldi ZL, 0xF6
+					ldi ZH, 0x13
+					call erase_page
+	
+					call wait_for_spm	;Wait SPM command to be executed.
+
+					;Load buffer with data
+					;ldi ZL, 0x00
+					;ldi ZH, 0x00
+					ldi r18, 0x0C
+					ldi r19, 0x94
+					call load_page_buffer
+
+		
+					;Clear the RWWSB bit
+					;ldi r16, 0x01
+					;out _SFR_IO_ADDR(SPMCSR), r16
+					;spm
+
+					;Write page
+					;ldi ZL, 0x00
+					;ldi ZH, 0x00
+					call write_page
+
+					call wait_for_spm*/
+					nop
+					nop
 
 
 
@@ -115,7 +133,7 @@
 		;PCPAGE = Z14:Z7
 		;Z0, Z15 are "don't care" bits.
 		;Before calling this subroutine Z register must be arranged.
-		;This subroutine uses r16, so it should be pushed to stack before run through.
+		;This subroutine uses r17, so it should be pushed to stack before run through.
 		push r17
 		ldi r17, (1 << PGERS) | (1 << SPMEN)	;0x03
 		out _SFR_IO_ADDR(SPMCSR), r17
@@ -201,33 +219,49 @@
 		;Set SS Pin high.
 		sbi _SFR_IO_ADDR(handshake_port), handshake_pin
 		ret
-
+	
 	set_page:
+		;This subroutine set page address with given r16 register.
+		;Subroutine uses r17, r20, r21 so these should be pushed to stack.
 		push r17
 		push r20
 		push r21
 
-		ldi r20, 0x00
-		ldi r21, 0x06
+		ldi r20, 0x00	;loop initial value.
+		ldi r21, 0x07	;loop final value.
 		
-		ldi r17, 0x00
+		ldi r17, 0x00	;given value will be shifted to r17.
 		
 		rjmp .L1
 
 	.L2:
-		lsl r16
-		rol r17
-		inc r20
+		lsl r16	;shift to left.
+		rol r17	;shift r17 with carry bit.
+		inc r20	;increment loop index.
 
 	.L1:
-		cp r20, r21
-		brlo .L2
+		cp r20, r21	;compare loop index with final
+		brlo .L2	;branch .L2 if final index hasn't been reached yet.
 
 		sts page_inf, r16
-		sts page_inf+1, r17
+		sts page_inf+1, r17	
 
 		pop r21
 		pop r20
+		pop r17
+		ret
+
+	set_word:
+		push r17
+
+		lds r17, page_inf
+		andi r17, 0x80
+		lsl r16
+		andi r16, 0x7E
+		or r16, r17
+
+		sts page_inf, r16
+
 		pop r17
 		ret
 
