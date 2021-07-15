@@ -12,27 +12,20 @@
 
 .global main
 
-;.equ hfuse, 0x0100
-
-.equ bootsz0_bit_no, 1
-.equ bootsz1_bit_no, 2
-.equ bootsz_filter, (1 << bootsz0_bit_no) | (1 << bootsz1_bit_no)
-.equ bootsz_256w, 6
-.equ bootsz_512w, 4
-.equ bootsz_1024w, 2
-.equ bootsz_2048w, 0
-
 .set dd_mosi, 3
 .set dd_sck, 5
 .set ss_line, 2
 
 .set handshake_pin, 7
 .set handshake_port, PORTD
+.set handshake_port_dir, DDRD
+.set handshake_port_pin, PIND
 
-
-.equ desired_boot_size, bootsz_2048w
 
 .section .data
+	hs_pin_state:
+		.byte 1
+
 	page_inf:
 		.word 1
 
@@ -41,76 +34,16 @@
 
 .section .text
 	main:
-					/*;Reading FUSE_HIGH
-					;Set Z = 0x0003,
-					;Set BLBSET and SELFPRGEN in SMPCSR
-					;Read Z register within 3 cycles with LPM. So disable interrupts first.
-					cli	;Disable interrupts
-					ldi r30, 0x03	;Set Z = 0x0003
-					ldi r31, 0x00
-					ldi r16, (1<<BLBSET) | (1<<SELFPRGEN)	;Set BLBSET = 1, SELFPRGEN = 1
-					out _SFR_IO_ADDR(SPMCSR), r16	;Write BLBSET and SELFPRGEN to SPMCSR
-					lpm r17, Z
-					;sei	;Enable interrupts
+		ldi r16, 0x0 
+		sts hs_pin_state, r16
 
-					sts hfuse, r17	;Store FUSE_HIGH in SRAM
-		
-					;Is bootsize large enough?
-					andi r17, bootsz_filter
-					cpi r17, desired_boot_size
-					;brne not_desired_bootsize	;Branch if it is not large enough.*/
-
-		call init_spi
+		call enable_pud
 		call init_handshake
-
-		ldi r16, 0x27
-		call set_page
-
-		ldi r16, 0x3B
-		call set_word
-
-		lds ZL, page_inf
-		lds ZH, page_inf+1
-		call erase_page
-
-		call wait_for_spm
-
-		ldi r18, 0x0C
-		ldi r19, 0x94
-		call load_page_buffer
-
-		call write_page
-		call wait_for_spm
+		call init_spi
+		call read_handshake
 
 
-					/*;Erase the page of 0x00
-					ldi ZL, 0xF6
-					ldi ZH, 0x13
-					call erase_page
-	
-					call wait_for_spm	;Wait SPM command to be executed.
 
-					;Load buffer with data
-					;ldi ZL, 0x00
-					;ldi ZH, 0x00
-					ldi r18, 0x0C
-					ldi r19, 0x94
-					call load_page_buffer
-
-		
-					;Clear the RWWSB bit
-					;ldi r16, 0x01
-					;out _SFR_IO_ADDR(SPMCSR), r16
-					;spm
-
-					;Write page
-					;ldi ZL, 0x00
-					;ldi ZH, 0x00
-					call write_page
-
-					call wait_for_spm*/
-					nop
-					nop
 
 
 
@@ -124,7 +57,7 @@
 			rjmp .loop
 		pop 16
 		ret
-
+	
 
 	erase_page:
 		;This subroutine erase the entire page pointed on Z register PCPAGE segment.
@@ -202,12 +135,8 @@
 		;This subroutine initializes handshake pin as an input pin.
 		;For more information please refer to Handshake protocol presentaion file.
 		;Handshake Pin -- > Port D7 
-		push r18
-
-		ldi r18, (1 << handshake_pin)
-		out _SFR_IO_ADDR(DDRD), r18
-
-		pop r18
+		cbi _SFR_IO_ADDR(handshake_port_dir), 7
+		sbi _SFR_IO_ADDR(handshake_port), 7
 		ret
 	
 	ss_low:
@@ -265,6 +194,34 @@
 		pop r17
 		ret
 
+	enable_pud:
+		;This subroutine enables pull up resistor for all ports when they are set as input.
+		push r16
 
-	not_desired_bootsize:
-		nop
+		in r16, _SFR_IO_ADDR(MCUCR)
+		andi r16, 0xEF
+		out _SFR_IO_ADDR(MCUCR), r16
+
+		pop r16
+		ret
+
+	read_handshake:
+		;This subroutine read handshake input pin state.
+		;If state is low, it writes hs_pin_state variable with 0x00, if state is high, it writes hs_pin_state variable with 0x01
+		push r17
+		
+		in r17, _SFR_IO_ADDR(handshake_port_pin)
+		andi r17, 0x80
+		cpi r17, 0x80
+		breq .state_high
+		ldi r17, 0x00
+		sts hs_pin_state, r17
+		rjmp .state_low	
+
+		.state_high:
+			ldi r17, 0x01
+			sts hs_pin_state, r17
+		.state_low:
+		
+		pop r17
+		ret
