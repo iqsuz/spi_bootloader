@@ -12,14 +12,18 @@
 
 .global main
 
+.set spi_dummy, 0xFF
+.set spi_port, PORTB
+.set spi_port_dir, DDRB
 .set dd_mosi, 3
 .set dd_sck, 5
-.set ss_line, 2
+.set ss_pin, 2
 
 .set handshake_pin, 7
 .set handshake_port, PORTD
 .set handshake_port_dir, DDRD
 .set handshake_port_pin, PIND
+
 
 
 .section .data
@@ -34,18 +38,24 @@
 
 .section .text
 	main:
-		ldi r16, 0x0 
-		sts hs_pin_state, r16
-
+		cli
 		call enable_pud
 		call init_handshake
+		call ss_high
 		call init_spi
-		call read_handshake
+		
+		call ss_low
+
+		ldi r16, 0x78
+		call write_spi
+		call wait_spi_transmit
+
+		ldi r16, 0x50
+		call write_spi
+		call wait_spi_transmit
 
 
-
-
-
+		ret
 
 	wait_for_spm:
 		;This subroutine waits until SPMEN bit in SPMCSR is cleared.
@@ -119,8 +129,8 @@
 		push r16
 
 		;This code block init the MOSI and SCK as output.
-		ldi r16, (1 << dd_mosi) | (1 << dd_sck) | (1 << ss_line)
-		out _SFR_IO_ADDR(DDRB), r16
+		ldi r16, (1 << dd_mosi) | (1 << dd_sck) | (1 << ss_pin)
+		out _SFR_IO_ADDR(spi_port_dir), r16
 
 		;This code block init the SPI unit as master, MSB and FCLK/2.
 		ldi r16, (1 << SPE) | (1 << MSTR)
@@ -131,22 +141,22 @@
 		pop r16
 		ret
 	
+	ss_low:
+		;Set SS Pin low.
+		cbi _SFR_IO_ADDR(spi_port), ss_pin
+		ret
+
+	ss_high:
+		;Set SS Pin high.
+		sbi _SFR_IO_ADDR(spi_port), ss_pin
+		ret
+
 	init_handshake:
 		;This subroutine initializes handshake pin as an input pin.
 		;For more information please refer to Handshake protocol presentaion file.
 		;Handshake Pin -- > Port D7 
 		cbi _SFR_IO_ADDR(handshake_port_dir), 7
 		sbi _SFR_IO_ADDR(handshake_port), 7
-		ret
-	
-	ss_low:
-		;Set SS Pin low.
-		cbi _SFR_IO_ADDR(handshake_port), handshake_pin
-		ret
-
-	ss_high:
-		;Set SS Pin high.
-		sbi _SFR_IO_ADDR(handshake_port), handshake_pin
 		ret
 	
 	set_page:
@@ -224,4 +234,34 @@
 		.state_low:
 		
 		pop r17
+		ret
+
+
+	write_spi:
+		push r17
+
+		in r17, _SFR_IO_ADDR(SPSR)
+		out _SFR_IO_ADDR(SPDR), r16
+
+		pop r17
+		ret
+
+	read_spi:
+		push r17
+
+		ldi r17, spi_dummy
+		out _SFR_IO_ADDR(SPDR), r17
+
+		pop r17
+		ret
+
+	wait_spi_transmit:
+		push r16
+
+		.wait_spi_transmit_loop:
+		in r16, _SFR_IO_ADDR(SPSR)
+		sbrs r16, SPIF
+		rjmp .wait_spi_transmit_loop
+
+		pop r16
 		ret
